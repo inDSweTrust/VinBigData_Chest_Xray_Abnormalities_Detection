@@ -1,7 +1,11 @@
 from pathlib import Path
+from config import FlagsDet, flags_yolo
 
-evaldir = Path('/home/sofia/Documents/VinBigData/Results/YOLOv5/Train_ALL/00_Eval')
+# Config
+flags = FlagsDet().update(flags_yolo)
+evaldir = Path(flags.evaldir)
 
+# Information is taken from txt files with mAP scores per class
 def read_eval_results(evaldir, file='IMG512_WBF_mAP'):
     f = open(evaldir / file, 'r')
     lines = f.readlines()
@@ -41,6 +45,3 @@ compare_results(class_names, IMG512, IMG1024_CLAHE, compare='IMG512 to IMG1024_C
 compare_results(class_names, IMG512, IMG512_Hist, compare='IMG512 to IMG512_Hist Comparison')
 compare_results(class_names, IMG512_CLAHE, IMG512_Hist, compare='IMG512_CLAHE to IMG512_Hist Comparison')
 
-
-# IMG512_CLAHE
-# IMG512

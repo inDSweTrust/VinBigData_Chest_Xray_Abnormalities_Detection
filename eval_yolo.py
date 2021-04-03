@@ -1,25 +1,25 @@
-import sys
-import numpy as np
-import pandas as pd
+import os
 import pandas as pd
 
-from glob import glob
-from tqdm.notebook import tqdm
 from map_boxes import mean_average_precision_for_boxes
 from pathlib import Path
-sys.path.insert(0, '/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/')
+
 from ensemble import ensemble_models
+from config import FlagsDet, flags_yolo
 
-
-
-dim = 512
+# Config
+flags = FlagsDet().update(flags_yolo)
+dim = flags.dim
+fold = flags.fold
 filtered = False
-fold = 2
 ensemble = True
-evaldir = Path('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/ZFTurbo_eval')
+evaldir = Path(flags.evaldir)
+os.makedirs(str(evaldir), exist_ok=True)
+yolodir = Path(flags.yolodir)
 
-def generate_anno(fold=2):
-    annotations_df = pd.read_csv('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/df_norm_folds.csv')
+
+def generate_anno(fold=2, indir=yolodir, outdir=evaldir):
+    annotations_df = pd.read_csv(indir / 'df_norm_folds.csv')
     annotations_df = annotations_df[annotations_df.fold == fold]
     annotations_df = annotations_df.drop(columns=['class_id', 'rad_id', 'width', 'height', 
                                                   'image_path', 'x_mid', 'y_mid', 'w', 'h', 
@@ -27,10 +27,10 @@ def generate_anno(fold=2):
     # Write anno to CSV
     annotations_df.reset_index(drop=True, inplace=True)
     annotations_df = annotations_df[['image_id','class_name','x_min','x_max','y_min','y_max']]
-    annotations_df.to_csv('annotations_df.csv', index=False)
+    annotations_df.to_csv(outdir / 'annotations_df.csv', index=False)
     
 
-def generate_pred(fold=2, dim=512, filtered=True, single_cls=True, cls=2):
+def generate_pred(fold=2, dim=512, filtered=True, single_cls=True, cls=2, indir=yolodir, outdir=evaldir):
     class_dict = {
         0: 'Aortic enlargement',
         1: 'Atelectasis',
@@ -49,7 +49,7 @@ def generate_pred(fold=2, dim=512, filtered=True, single_cls=True, cls=2):
         14: "No finding"
     }
     # best pred from YOLO
-    pred_df = pd.read_json('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/yolov5/runs/test/exp/best_predictions.json')
+    pred_df = pd.read_json(indir / 'yolov5/runs/test/exp/best_predictions.json')
 
     # if single_cls:
     #     pred_df.loc[pred_df.category_id==0, 'category_id'] = cls
@@ -105,26 +105,33 @@ def generate_pred(fold=2, dim=512, filtered=True, single_cls=True, cls=2):
     #     pred_df.reset_index(drop=True, inplace=True)
     
     if filtered:
-        pred_df.to_csv('pred_df_filtered.csv', index=False)
+        pred_df.to_csv(outdir / 'pred_df_filtered.csv', index=False)
     elif single_cls:
-        pred_df.to_csv(f'pred_df_{class_dict[cls]}.csv', index=False)
+        pred_df.to_csv(outdir / f'pred_df_{class_dict[cls]}.csv', index=False)
     else:
-        pred_df.to_csv('pred_df.csv', index=False)
+        pred_df.to_csv(outdir / 'pred_df.csv', index=False)
+        
+def evaluate(*pred_df, outdir=evaldir, filtered=False, ensemble=False):
+    ann = pd.read_csv(outdir / 'annotations_df.csv')
+    if filtered:
+        det = pd.read_csv(outdir / 'pred_df_filtered.csv')
+    elif ensemble:
+        preds = []
+        for i, pred in enumerate(pred_df):
+            preds.append(pred)
+        ensemble_models(preds[0], preds[1], path=evaldir, evaluation=True)
+        det = pd.read_csv(outdir / 'pred_df_ensembled.csv')
+    else:
+        det = pd.read_csv(outdir / 'pred_df.csv')
+        
+    ann = ann[['image_id', 'class_name', 'x_min', 'x_max', 'y_min', 'y_max']].values
+    det = det[['image_id', 'class_name', 'score', 'x_min', 'x_max', 'y_min', 'y_max']].values
+    mean_ap, average_precisions = mean_average_precision_for_boxes(ann, det, iou_threshold=0.4)
+    
     
 # generate_anno(fold=fold)
 # generate_pred(fold=fold, dim=dim, filtered=filtered, single_cls=False, cls=2)
-
-ann = pd.read_csv('annotations_df.csv')
-if filtered:
-    det = pd.read_csv('pred_df_filtered.csv')
-elif ensemble:
-    pred_df1 = pd.read_csv('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/ZFTurbo_eval/pred_df_512.csv')
-    pred_df2 = pd.read_csv('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/ZFTurbo_eval/pred_df_1024.csv')
-    ensemble_models(pred_df1, pred_df2, path=evaldir, evaluation=True)
-    det = pd.read_csv('pred_df_ensembled.csv')
-else:
-    det = pd.read_csv('pred_df_512.csv')
-ann = ann[['image_id', 'class_name', 'x_min', 'x_max', 'y_min', 'y_max']].values
-det = det[['image_id', 'class_name', 'score', 'x_min', 'x_max', 'y_min', 'y_max']].values
-mean_ap, average_precisions = mean_average_precision_for_boxes(ann, det, iou_threshold=0.4)
-
+# pred_df1 = pd.read_csv(evaldir / 'pred_df1.csv')
+# pred_df2 = pd.read_csv(evaldir / 'pred_df2.csv')
+# evaluate(pred_df1, pred_df2, outdir=evaldir, filtered=False, ensemble=True)
+evaluate(outdir=evaldir, filtered=False, ensemble=False)

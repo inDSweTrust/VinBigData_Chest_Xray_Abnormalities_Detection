@@ -1,25 +1,25 @@
 import shutil, os
 import yaml
-import torch
 import json
 import random
 
-import matplotlib.pyplot as plt
 import numpy as np, pandas as pd
-import seaborn as sns
 from glob import glob
 from sklearn.model_selection import GroupKFold
 from tqdm.notebook import tqdm
 from pathlib import Path
-from IPython.display import Image, clear_output
+
+from config import FlagsDet, flags_yolo
 
 from os import listdir
 from os.path import isfile, join
 
 # Config
-dim = 512 #512, 256, 'original'
-fold = 2
-use_class14 = True
+flags = FlagsDet().update(flags_yolo)
+dim = flags.dim
+fold = flags.fold
+use_class14 = flags.use_class14
+print(f"IMG: {dim}, fold {fold}, use_class14: {use_class14}")
 # Classes
 classes = ['Aortic enlargement',
             'Atelectasis',
@@ -39,14 +39,16 @@ if use_class14:
     classes.append('No finding')
     
 # Directories
-inputdir = Path('/home/sofia/Documents/VinBigData/Data')
-imgdir = Path(f'/home/sofia/Documents/VinBigData/Data/images_{dim}')
-yolodir = Path('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5')
-outdir = Path('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/output')
+inputdir = Path(flags.inputdir)
+imgdir = Path(inputdir / f'images_{dim}')
+yolodir = Path(flags.yolodir)
+outdir = Path(flags.outdir)
 os.makedirs(str(outdir), exist_ok=True)
 
+#Based on https://www.kaggle.com/awsaf49/vinbigdata-cxr-ad-yolov5-14-class-train
 def create_norm_df_folds(inputdir, dim=512, use_class14=True, use_nih=False, fold=4):
-    # Create Normalized train_df 
+    # Create Normalized train_df
+    # Concatenate original dataset with external dataset - specify external dataset path
     if use_nih:
         vbd_df = pd.read_csv(inputdir / 'train_wh.csv')
         vbd_df.fillna(0, inplace=True)
@@ -56,14 +58,14 @@ def create_norm_df_folds(inputdir, dim=512, use_class14=True, use_nih=False, fol
         train_df.fillna(0, inplace=True)
         train_df.reset_index(drop=True, inplace=True)
 
-        train_df.loc[0:67914,'image_path'] = f'/home/sofia/Documents/VinBigData/Data/images_{dim}/train/'+ train_df.image_id+('.png' if dim!='original' else '.jpg')
-        train_df.loc[67914:69721,'image_path'] = f'/home/sofia/Documents/VinBigData/Data/NIH/images_{dim}/'+train_df.image_id+('.png')
+        train_df.loc[0:67914,'image_path'] = flags.inputdir + f'/images_{dim}/train/' + train_df.image_id+('.png' if dim!='original' else '.jpg')
+        train_df.loc[67914:69721,'image_path'] = flags.inputdir + f'/NIH/images_{dim}/'+train_df.image_id+('.png')
 
     else:
-        train_df = pd.read_csv(inputdir / 'train_wh_wbf.csv') # WBF ENABLED!!!
+        train_df = pd.read_csv(inputdir / 'train_wh_wbf.csv') # Train with WBF
         train_df.fillna(0, inplace=True)
     
-        train_df['image_path'] = f'/home/sofia/Documents/VinBigData/Data/images_{dim}/train/'+train_df.image_id+('.png' if dim!='original' else '.jpg')
+        train_df['image_path'] = flags.inputdir + f'/images_{dim}/train/' + train_df.image_id+('.png' if dim!='original' else '.jpg')
     
     if use_class14 == False:
         train_df = train_df[train_df.class_id!=14].reset_index(drop = True)
@@ -97,26 +99,26 @@ def create_norm_df_folds(inputdir, dim=512, use_class14=True, use_nih=False, fol
 
 # create_norm_df_folds(inputdir, dim=512, use_class14=True, use_nih=False, fold=4)
 
-def change_path_norm_df_folds(dim):
-    df = pd.read_csv(yolodir / 'df_norm_folds.csv')
+def change_path_norm_df_folds(dim, dir=yolodir):
+    df = pd.read_csv(dir / 'df_norm_folds.csv')
     for i, path in enumerate(df['image_path'].values):
         split_path = path.split('/')
         split_path[6] = f'images_{dim}'
         df.loc[i, 'image_path'] = '/'.join(split_path)
     
-    df.to_csv(yolodir / 'df_norm_folds.csv', index=False)
+    df.to_csv(dir / 'df_norm_folds.csv', index=False)
     
-# change_path_norm_df_folds(dim=640)
+# change_path_norm_df_folds(dim=512, dir=yolodir)
 
-def create_single_cls_df(use_class14=True, cls=2):
-    df = pd.read_csv(yolodir / 'df_norm_folds.csv')
+def create_single_cls_df(dir=yolodir, use_class14=True, cls=2):
+    df = pd.read_csv(dir / 'df_norm_folds.csv')
     if use_class14:
         df = df[(df.class_id == cls) | (df.class_id == 14)]
     else:
         df = df[df.class_id == cls]
-    df.to_csv(yolodir / f'df_norm_folds_{classes[cls]}.csv', index=False)
+    df.to_csv(dir / f'df_norm_folds_{classes[cls]}.csv', index=False)
 
-# create_single_cls_df(use_class14=True, cls=2)
+# create_single_cls_df(dir=yolodir, use_class14=True, cls=2)
 
 def annotations_coco_format(fold=fold, dim=512, val300=False):
     df = pd.read_csv(yolodir / 'df_norm_folds.csv')
@@ -125,7 +127,7 @@ def annotations_coco_format(fold=fold, dim=512, val300=False):
     
     if val300:
         val_300 = []
-        with open(join(yolodir, 'val300.txt'), 'r') as f:
+        with open(join(yolodir, 'yolo_files/val300.txt'), 'r') as f:
             for path in f:
                 split1 = path.split('/')[9]
                 imgid = split1.split('.')[0]
@@ -167,7 +169,8 @@ def annotations_coco_format(fold=fold, dim=512, val300=False):
     coco_dict['categories'] = categories
     coco_dict['annotations'] = annotations
     
-    out = Path('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5')
+    out = Path(yolodir / 'yolo_files')
+    os.makedirs(str(out), exist_ok=True)
     if val300:
         with open(out / f'gt_coco_format_fold{fold}_val300.json', 'w') as f:
             f.write(json.dumps(coco_dict))
@@ -182,40 +185,43 @@ def annotations_coco_format(fold=fold, dim=512, val300=False):
 # annotations_coco_format(fold=fold, dim=dim, val300=False)
 
 
-def make_yolo_train_files(yolodir, fold=fold, single_cls=True, cls=2):
+def make_yolo_train_files(dir=yolodir, fold=fold, single_cls=True, cls=2):
     if single_cls:
-        train_df = pd.read_csv(yolodir / f'df_norm_folds_{classes[cls]}.csv')
+        train_df = pd.read_csv(dir / f'df_norm_folds_{classes[cls]}.csv')
     else:
-        train_df = pd.read_csv(yolodir / 'df_norm_folds.csv')
+        train_df = pd.read_csv(dir / 'df_norm_folds.csv')
     train_files = []
     val_files   = []
     val_files += list(train_df[train_df.fold==fold].image_path.unique())
     train_files += list(train_df[train_df.fold!=fold].image_path.unique())
     print(len(train_files), len(val_files))
-        
-    with open(join(yolodir , 'train.txt'), 'w') as f:
-        for path in glob('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/input/images/train/*'):
+    
+    out = Path(dir / 'yolo_files')
+    os.makedirs(str(out), exist_ok=True)
+
+    with open(join(out , 'train.txt'), 'w') as f:
+        for path in glob(flags.yolodir + '/input/images/train/*'):
             f.write(path+'\n')
                 
-    with open(join(yolodir , 'val.txt'), 'w') as f:
-        for path in glob('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/input/images/val/*'):
+    with open(join(out, 'val.txt'), 'w') as f:
+        for path in glob(flags.yolodir + '/input/images/val/*'):
             f.write(path+'\n')
     
     data = dict(
-        train =  join(yolodir , 'train.txt') ,
-        val   =  join(yolodir , 'val.txt' ),
+        train =  join(out , 'train.txt') ,
+        val   =  join(out , 'val.txt' ),
         nc    = len(classes),
         names = classes
         )
     
-    with open(join( yolodir , 'vinbigdata.yaml'), 'w') as outfile:
+    with open(join(out ,'vinbigdata.yaml'), 'w') as outfile:
         yaml.dump(data, outfile, default_flow_style=False)
     
-    f = open(join( yolodir , 'vinbigdata.yaml'), 'r')
+    f = open(join(out ,'vinbigdata.yaml'), 'r')
     print('\nyaml:')
     print(f.read())
     
-    yoloindir = Path('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/input')
+    yoloindir = Path(yolodir / 'input')
     # Make txt files containing normalized labels (cat, bbox)
     os.makedirs(yoloindir / 'labels/train', exist_ok = True)
     os.makedirs(yoloindir / 'labels/val', exist_ok = True)
@@ -233,41 +239,42 @@ def make_yolo_train_files(yolodir, fold=fold, single_cls=True, cls=2):
         filename = file.split('/')[-1].split('.')[0]
         shutil.copy(os.path.join(labeldir, filename+'.txt'), yoloindir / 'labels/val')
 
-make_yolo_train_files(yolodir, fold=fold, single_cls=False, cls=2)
+# make_yolo_train_files(dir=yolodir, fold=fold, single_cls=False, cls=2)
 
-def make_yolo_val300(yolodir, fold=fold):
+def make_yolo_val300(dir=yolodir, dim=dim, fold=fold):
     val300_files = []
-    with open(join(yolodir, 'val.txt'), 'r') as f:
+    with open(join(dir, 'yolo_files/val.txt'), 'r') as f:
         for file_path in f.readlines():
             val300_files.append(file_path)
             
     randomlist = random.sample(range(0, 3000), 300)
     val300_files = list(np.array(val300_files)[randomlist])
 
-    with open(join(yolodir, 'val300.txt'), 'w') as f:
+    with open(join(dir, 'yolo_files/val300.txt'), 'w') as f:
         for path in val300_files:
             f.write(path)
             
     data = dict(
-        train =  join(yolodir , 'train.txt') ,
-        val   =  join(yolodir , 'val300.txt' ),
+        train =  join(dir , 'yolo_files/train.txt') ,
+        val   =  join(dir , 'yolo_files/val300.txt' ),
         nc    = len(classes),
         names = classes
         )
     
-    with open(join( yolodir , 'vinbigdata300.yaml'), 'w') as outfile:
+    with open(join(dir , 'yolo_files/vinbigdata300.yaml'), 'w') as outfile:
         yaml.dump(data, outfile, default_flow_style=False)
     
-    annotations_coco_format(fold=fold, dim=512, val300=True)
+    annotations_coco_format(fold=fold, dim=dim, val300=True)
         
-# make_yolo_val300(yolodir, fold=4)
+# make_yolo_val300(yolodir, dim=dim, fold=fold)
 
-def make_yolo_labels(single_cls=True, cls=2):
-    labeldir = Path('/home/sofia/Documents/VinBigData/Data/yolov5_labels')
+def make_yolo_labels(inputdir=inputdir, yolodir=yolodir, single_cls=True, cls=2):
+    labeldir = Path(inputdir / 'yolov5_labels')
+    os.makedirs(str(labeldir), exist_ok=True)
     if single_cls:
-        train_df = pd.read_csv(f'/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/df_norm_folds_{classes[cls]}.csv')
+        train_df = pd.read_csv(yolodir / f'df_norm_folds_{classes[cls]}.csv')
     else:
-        train_df = pd.read_csv('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/df_norm_folds.csv')
+        train_df = pd.read_csv(yolodir / 'df_norm_folds.csv')
     image_ids = train_df['image_id'].unique()
 
     label_dict = []
@@ -295,7 +302,7 @@ def make_yolo_labels(single_cls=True, cls=2):
                     f.write("%s" % l + ' ')
                 f.write("\n")
 
-# make_yolo_labels(single_cls=False, cls=2)
+# make_yolo_labels(inputdir, yolodir, single_cls=False, cls=2)
 
 
     

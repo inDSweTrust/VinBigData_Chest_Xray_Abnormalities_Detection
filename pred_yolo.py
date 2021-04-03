@@ -5,11 +5,16 @@ from glob import glob
 from tqdm import tqdm
 from ensemble import ensemble_models
 from pathlib import Path
+from config import FlagsDet, flags_yolo
 
-dim = 1024
-test_df = pd.read_csv(f'/home/sofia/Documents/VinBigData/Data/images_{dim}/test_meta_yolo.csv')
-outdir = Path('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/output')
+# Config
+flags = FlagsDet().update(flags_yolo)
+dim = flags.dim
+inputdir = Path(flags.inputdir)
+outdir = Path(flags.outdir)
+test_df = pd.read_csv(inputdir / f'images_{dim}/test_meta_yolo.csv')
 
+# Based on https://www.kaggle.com/awsaf49/vinbigdata-cxr-ad-yolov5-14-class-infer
 def yolo2voc(image_height, image_width, bboxes, ensemble=False):
     """
     yolo => [xmid, ymid, w, h] (normalized)
@@ -33,7 +38,7 @@ def yolo2voc(image_height, image_width, bboxes, ensemble=False):
 def delete_class(pred_df):
     pred_df = pred_df.drop(index=pred_df[pred_df.class_name==14].index)
 
-def generate_det_df(test_df, ensemble=False, name=''):
+def generate_det_df(test_df, ensemble=False, outdir = outdir, name=''):
     """
     Generates a predictions dataframe from YOLOv5 det files which can be 
     directly used to create submission.csv or used for ensembling.
@@ -41,7 +46,7 @@ def generate_det_df(test_df, ensemble=False, name=''):
     """ 
     results = []
     
-    for file_path in tqdm(glob('/home/sofia/Documents/VinBigData/VinBigData_YOLOv5/yolov5/runs/detect/exp/labels/*txt')):
+    for file_path in tqdm(glob(flags.yolodir + '/yolov5/runs/detect/exp/labels/*txt')):
         image_id = file_path.split('/')[-1].split('.')[0]
         w, h = test_df.loc[test_df.image_id==image_id,['width', 'height']].values[0]
         f = open(file_path, 'r')
@@ -70,13 +75,12 @@ def generate_det_df(test_df, ensemble=False, name=''):
     pred_df = pd.DataFrame(results)
     pred_df.to_csv(outdir / f'pred_{name}.csv',index = False)
     
-        
-def generate_submission(pred_df, test_df, ensemble=True):
+    
+def generate_submission(pred_df, test_df, outdir=outdir, ensemble=True):
     """
     Generates submission.csv from pred csv file (single model or ensemble)
     
     """ 
-    test_df = pd.read_csv(f'/home/sofia/Documents/VinBigData/Data/images_{dim}/test_meta_yolo.csv')
     image_ids = pred_df.image_id.unique()
 
     image_ids_list = []
@@ -115,11 +119,6 @@ def generate_submission(pred_df, test_df, ensemble=True):
                     pred_str[idx] = str(int(float(pred_str[idx]))) if idx%6!=1 else pred_str[idx]
                 pred_str = ' '.join(pred_str)
             
-            
-            # pred_str = list(np.round(np.concatenate((class_name, score, bbox), axis =1).reshape(-1), 1).astype(str))
-            # for idx in range(len(pred_str)):
-            #     pred_str[idx] = str(int(float(pred_str[idx]))) if idx%6!=1 else pred_str[idx]
-            # pred_str = ' '.join(pred_str)
             image_ids_list.append(i)    
             predictions.append(pred_str)
             pbar.update(1)
@@ -130,13 +129,12 @@ def generate_submission(pred_df, test_df, ensemble=True):
     submission_df = submission_df[['image_id', 'PredictionString']]
     submission_df.to_csv(outdir / 'submission.csv', index = False)
     
-# generate_det_df(test_df, ensemble=True, name='norm')
+# generate_det_df(test_df, ensemble=True, outdir=outdir, name='norm')
 
 # pred_df1 = pd.read_csv(outdir / 'pred_512.csv')
 # pred_df2 = pd.read_csv(outdir / 'pred_1024.csv')
 # pred_df3 = pd.read_csv(outdir / 'pred_norm.csv')
 # ensemble_models(pred_df1, pred_df2, pred_df3, path=outdir, evaluation=False)
 
-# generate_submission(pred_df=pd.read_csv(outdir / 'pred_512_single.csv'), test_df=test_df, ensemble=False)
-
-generate_submission(pred_df=pd.read_csv(outdir / 'pred_df_ensembled.csv'), test_df=test_df, ensemble=True)
+generate_submission(pred_df=pd.read_csv(outdir / 'pred_norm.csv'), test_df=test_df, ensemble=False)
+# generate_submission(pred_df=pd.read_csv(outdir / 'pred_df_ensembled.csv'), test_df=test_df, outdir=outdir, ensemble=True)

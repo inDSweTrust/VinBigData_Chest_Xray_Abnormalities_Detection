@@ -1,13 +1,16 @@
 import pandas as pd
-import cv2
 
 from pathlib import Path
 from tqdm import tqdm
 from ensemble_boxes import weighted_boxes_fusion
+from config import FlagsDet, flags_yolo
 
+# Config
+flags = FlagsDet().update(flags_yolo)
+inputdir = Path(flags.inputdir)
 
-def wbf(df, iou_thr, skip_box_thr):
-    df = pd.read_csv('/home/sofia/Documents/VinBigData/Data/train_wh.csv')
+#Based on  https://www.kaggle.com/c/vinbigdata-chest-xray-abnormalities-detection/discussion/208468
+def wbf(df, iou_thr, skip_box_thr, inputdir):
     df.fillna(0, inplace=True)
     df.loc[df["class_id"] == 14, ['x_max', 'y_max']] = 1.0
     
@@ -34,7 +37,6 @@ def wbf(df, iou_thr, skip_box_thr):
     
     for image_id in tqdm(image_ids, total=len(image_ids)):
         # All annotations for the current image.
-        image_id = '051132a778e61a86eb147c7c6f564dfe'
         data = df[df["image_id"] == image_id]
         data = data.reset_index(drop=True)
         
@@ -100,13 +102,9 @@ def wbf(df, iou_thr, skip_box_thr):
             })
     
     results = pd.DataFrame(results)
-    results.to_csv('/home/sofia/Documents/VinBigData/Data/train_wh_wbf.csv', index=False)
+    results.to_csv(inputdir / 'train_wh_wbf.csv', index=False)
     return results
 
-train_df = pd.read_csv('/home/sofia/Documents/VinBigData/Data/train_wh.csv')
-wbf(df=train_df, iou_thr=0.6, skip_box_thr=0.0001)
-
-# =============================================================================
-# 
-# =============================================================================
+train_df = pd.read_csv(inputdir / 'train_wh.csv')
+wbf(df=train_df, iou_thr=0.6, skip_box_thr=0.0001, inputdir=inputdir)
 
